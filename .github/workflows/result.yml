@@ -1,0 +1,33 @@
+name: Validation
+'on':
+  pull_request:
+    branches:
+    - rehearsal
+    paths:
+    - registry/**
+permissions:
+  contents: read
+jobs:
+  validation:
+    name: see / see
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - name: Verify the exact commit result
+      env:
+        READ_TOKEN: ${{ github.token }}
+      shell: python
+      run: "\nimport base64, json, os, pathlib, subprocess, time, urllib.error, urllib.request\n\nroot = pathlib.Path(os.environ[\"RUNNER_TEMP\"])\npublic = root\
+        \ / \"validation-public.pem\"\npublic.write_text('-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAuPmp85w8P73qzAcn2vwoBxcj2ltsNanHkIJU4B7Yeng=\\n-----END PUBLIC\
+        \ KEY-----\\n')\nwith open(os.environ[\"GITHUB_EVENT_PATH\"]) as stream:\n    event = json.load(stream)\npr = event[\"pull_request\"]\nrepo = os.environ[\"\
+        GITHUB_REPOSITORY\"]\nhead = pr[\"head\"][\"sha\"]\nbase = pr[\"base\"][\"sha\"]\nassert pr[\"head\"][\"repo\"][\"full_name\"] == repo and pr[\"base\"][\"\
+        ref\"] == \"rehearsal\"\nendpoint = f\"https://api.github.com/repos/{repo}/contents/receipt.json?ref=report-{head}\"\nfor attempt in range(180):\n    req\
+        \ = urllib.request.Request(endpoint + f\"&poll={attempt}\", headers={\n        \"Accept\":\"application/vnd.github.raw+json\",\n        \"Authorization\"\
+        :\"Bearer \" + os.environ[\"READ_TOKEN\"]})\n    try:\n        with urllib.request.urlopen(req, timeout=10) as response:\n            receipt = json.load(response)\n\
+        \        break\n    except urllib.error.HTTPError as error:\n        if error.code != 404:\n            raise\n        time.sleep(4)\nelse:\n    raise SystemExit(\"\
+        No signed result was received\")\npayload = base64.b64decode(receipt[\"data\"], validate=True)\nmessage, signature = root / \"validation-message\", root /\
+        \ \"validation-signature\"\nmessage.write_bytes(payload)\nsignature.write_bytes(base64.b64decode(receipt[\"signature\"], validate=True))\nsubprocess.run([\"\
+        openssl\",\"pkeyutl\",\"-verify\",\"-pubin\",\"-inkey\",str(public),\"-rawin\",\n                \"-in\",str(message),\"-sigfile\",str(signature)], check=True)\n\
+        claim = json.loads(payload)\nassert claim[\"repo\"] == repo and claim[\"head\"] == head and claim[\"base\"] == base and claim[\"number\"] == pr[\"number\"\
+        ]\nassert claim[\"verdict\"] in {\"success\",\"failure\"}\nprint(\"Signed validation result:\", claim[\"verdict\"], flush=True)\nraise SystemExit(0 if claim[\"\
+        verdict\"] == \"success\" else 1)\n"
